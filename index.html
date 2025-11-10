@@ -6,7 +6,8 @@
   <title>尾盘交易日志</title>
   <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
-  <script src="https://unpkg.com/babel-standalone@7/babel.min.js"></script>
+  <!-- 修复：使用 babel-standalone 6.26.0 版本 -->
+  <script src="https://unpkg.com/babel-standalone@6.26.0/babel.min.js"></script>
   <style>
     body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 0; background: #f8f9fa; }
     .container { max-width: 600px; margin: 0 auto; padding: 16px; }
@@ -137,8 +138,7 @@
         if (newDrawdown < -settings.maxDrawdown) {
           const twoWeeksLater = new Date();
           twoWeeksLater.setDate(twoWeeksLater.getDate() + 14);
-          // 设置为当天结束，确保整日停盘
-          twoWeeksLater.setHours(23, 59, 59, 999);
+          twoWeeksLater.setHours(23, 59, 59, 999); // 确保是当天结束
 
           const newSettings = { ...settings, stopEndDate: twoWeeksLater.toISOString() };
           setSettings(newSettings);
@@ -249,8 +249,22 @@
           )}
 
           {modal && (
-            <div style={styles.modal}>
-              <div style={styles.modalContent}>
+            <div style={{
+              position: 'fixed',
+              top: 0, left: 0, right: 0, bottom: 0,
+              backgroundColor: 'rgba(0,0,0,0.5)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              zIndex: 1000
+            }}>
+              <div style={{
+                backgroundColor: 'white',
+                padding: '20px',
+                borderRadius: '10px',
+                width: '90%',
+                maxWidth: '500px'
+              }}>
                 <h2>{editId ? '编辑' : '添加'}交易</h2>
                 <input 
                   type="date" 
@@ -310,28 +324,6 @@
         </div>
       );
     }
-
-    const styles = {
-      modal: { 
-        position: 'fixed', 
-        top: 0, 
-        left: 0, 
-        right: 0, 
-        bottom: 0, 
-        backgroundColor: 'rgba(0,0,0,0.5)', 
-        display: 'flex', 
-        alignItems: 'center', 
-        justifyContent: 'center',
-        zIndex: 1000
-      },
-      modalContent: { 
-        backgroundColor: 'white', 
-        padding: '20px', 
-        borderRadius: '10px', 
-        width: '90%', 
-        maxWidth: '500px'
-      }
-    };
 
     const root = ReactDOM.createRoot(document.getElementById('app'));
     root.render(<App />);
