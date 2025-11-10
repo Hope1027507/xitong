@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>尾盘交易日志</title>
+  <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <script src="https://unpkg.com/babel-standalone@7/babel.min.js"></script>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 0; background: #f8f9fa; }
+    .container { max-width: 600px; margin: 0 auto; padding: 16px; }
+    .header { background: #1E90FF; color: white; padding: 16px; border-radius: 10px; text-align: center; margin: 16px; }
+    .card { background: white; padding: 16px; margin-bottom: 12px; border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+    .input { width: 100%; border: 1px solid #ddd; padding: 12px; margin: 8px 0; border-radius: 8px; box-sizing: border-box; }
+    button { padding: 10px 16px; margin: 5px; border: none; border-radius: 8px; cursor: pointer; }
+    .btn-primary { background: #1E90FF; color: white; }
+    .btn-danger { background: #dc3545; color: white; }
+    .btn-warning { background: #ffc107; color: black; }
+    .profit { color: #28a745; font-weight: bold; }
+    .loss { color: #dc3545; font-weight: bold; }
+    .warning { background: #fff3cd; border: 1px solid #ffeaa7; padding: 12px; border-radius: 8px; margin: 16px; text-align: center; color: #856404; }
+    textarea.input { resize: vertical; }
+  </style>
+</head>
+<body>
+  <div id="app"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect } = React;
+
+    const STORAGE_KEY = 'weiban_trades_v2';
+    const SETTINGS_KEY = 'weiban_settings_v2';
+
+    function App() {
+      const [trades, setTrades] = useState([]);
+      const [settings, setSettings] = useState({ totalCapital: 20000, maxDrawdown: 6, stopEndDate: null });
+      const [form, setForm] = useState({
+        date: new Date().toISOString().split('T')[0],
+        code: '', name: '', sector: '', buyTime: '14:45',
+        buyPrice: '', sellTime: '', sellPrice: '',
+        quantity: '100', reason: '', nextOpen: '', notes: ''
+      });
+      const [editId, setEditId] = useState(null);
+      const [modal, setModal] = useState(false);
+
+      // 加载数据
+      useEffect(() => {
+        const load = () => {
+          const ts = localStorage.getItem(STORAGE_KEY);
+          const ss = localStorage.getItem(SETTINGS_KEY);
+          setTrades(ts ? JSON.parse(ts) : []);
+          if (ss) setSettings(JSON.parse(ss));
+        };
+        load();
+      }, []);
+
+      const saveTrades = (data) => {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+      };
+      const saveSettings = (data) => {
+        localStorage.setItem(SETTINGS_KEY, JSON.stringify(data));
+      };
+
+      // 仅计算已平仓交易的总盈亏
+      const realizedTrades = trades.filter(t => t.sellPrice && t.sellPrice.trim() !== '');
+      const totalProfit = realizedTrades.reduce((sum, t) => sum + parseFloat(t.profit || 0), 0);
+      const drawdownPercent = ((totalProfit / settings.totalCapital) * 100).toFixed(2);
+
+      // 判断是否处于停盘期（包含整日）
+      const isStopped = () => {
+        if (!settings.stopEndDate) return false;
+        const stopDate = new Date(settings.stopEndDate);
+        const today = new Date();
+        // 比较日期部分（忽略时分秒）
+        const stopYMD = stopDate.getFullYear() + '-' + String(stopDate.getMonth() + 1).padStart(2, '0') + '-' + String(stopDate.getDate()).padStart(2, '0');
+        const todayYMD = today.getFullYear() + '-' + String(today.getMonth() + 1).padStart(2, '0') + '-' + String(today.getDate()).padStart(2, '0');
+        return stopYMD >= todayYMD;
+      };
+
+      const handleSubmit = () => {
+        if (isStopped()) {
+          const stopDate = new Date(settings.stopEndDate);
+          alert(`因亏损超${settings.maxDrawdown}%，交易暂停至 ${stopDate.toLocaleDateString()}`);
+          return;
+        }
+
+        const { code, name, buyPrice, quantity } = form;
+        if (!code || !name || !buyPrice || !quantity) {
+          alert('请填写必要字段：代码、名称、买入价、数量');
+          return;
+        }
+
+        const buyPriceNum = parseFloat(buyPrice);
+        const quantityNum = parseInt(quantity, 10);
+        if (isNaN(buyPriceNum) || buyPriceNum <= 0) {
+          alert('买入价必须是大于0的数字');
+          return;
+        }
+        if (isNaN(quantityNum) || quantityNum < 100 || quantityNum % 100 !== 0) {
+          alert('数量必须是100的整数倍（如100, 200...）');
+          return;
+        }
+
+        let profit = '';
+        let profitRatio = '';
+
+        if (form.sellPrice && form.sellPrice.trim() !== '') {
+          const sellPriceNum = parseFloat(form.sellPrice);
+          if (isNaN(sellPriceNum) || sellPriceNum < 0) {
+            alert('卖出价必须是非负数字');
+            return;
+          }
+          profit = ((sellPriceNum - buyPriceNum) * quantityNum).toFixed(2);
+          profitRatio = buyPriceNum > 0 ? (((sellPriceNum / buyPriceNum) - 1) * 100).toFixed(2) : '0.00';
+        }
+
+        const newTrade = {
+          id: editId || Date.now().toString(),
+          ...form,
+          profit,
+          profitRatio,
+        };
+
+        const newTrades = editId
+          ? trades.map(t => t.id === editId ? newTrade : t)
+          : [newTrade, ...trades];
+
+        setTrades(newTrades);
+        saveTrades(newTrades);
+
+        // 风控检查：仅基于已实现盈亏
+        const newRealizedTrades = newTrades.filter(t => t.sellPrice && t.sellPrice.trim() !== '');
+        const newTotalProfit = newRealizedTrades.reduce((sum, t) => sum + parseFloat(t.profit || 0), 0);
+        const newDrawdown = (newTotalProfit / settings.totalCapital) * 100;
+
+        if (newDrawdown < -settings.maxDrawdown) {
+          const twoWeeksLater = new Date();
+          twoWeeksLater.setDate(twoWeeksLater.getDate() + 14);
+          // 设置为当天结束，确保整日停盘
+          twoWeeksLater.setHours(23, 59, 59, 999);
+
+          const newSettings = { ...settings, stopEndDate: twoWeeksLater.toISOString() };
+          setSettings(newSettings);
+          saveSettings(newSettings);
+
+          alert(`⚠️ 风控触发！累计亏损超${settings.maxDrawdown}%，交易暂停至 ${twoWeeksLater.toLocaleDateString()}`);
+        }
+
+        resetForm();
+        setModal(false);
+      };
+
+      const resetForm = () => {
+        setForm({
+          date: new Date().toISOString().split('T')[0],
+          code: '', name: '', sector: '', buyTime: '14:45',
+          buyPrice: '', sellTime: '', sellPrice: '',
+          quantity: '100', reason: '', nextOpen: '', notes: ''
+        });
+        setEditId(null);
+      };
+
+      const startEdit = (item) => {
+        setForm({ ...item });
+        setEditId(item.id);
+        setModal(true);
+      };
+
+      const deleteTrade = (id) => {
+        if (confirm('确认删除该交易记录？')) {
+          const filtered = trades.filter(t => t.id !== id);
+          setTrades(filtered);
+          saveTrades(filtered);
+        }
+      };
+
+      const openSettings = () => {
+        const input = prompt('请输入总本金（当前：¥' + settings.totalCapital.toLocaleString() + '）', settings.totalCapital);
+        if (input !== null) {
+          const capital = parseFloat(input);
+          if (isNaN(capital) || capital <= 0) {
+            alert('请输入有效的正数金额');
+            return;
+          }
+          const newSettings = { ...settings, totalCapital: capital };
+          setSettings(newSettings);
+          saveSettings(newSettings);
+          alert('本金已更新为 ¥' + capital.toLocaleString());
+        }
+      };
+
+      return (
+        <div className="container">
+          <div className="header">
+            <h1>📈 尾盘交易日志</h1>
+            <p>本金: ¥{settings.totalCapital.toLocaleString()}</p >
+            <p>累计盈亏: <span className={totalProfit >= 0 ? 'profit' : 'loss'}>
+              ¥{totalProfit.toFixed(2)} ({drawdownPercent}%)
+            </span></p >
+            {isStopped() && (
+              <div className="warning">
+                ⚠️ 亏损超{settings.maxDrawdown}%，暂停交易至<br/>
+                <strong>{new Date(settings.stopEndDate).toLocaleDateString()}</strong>
+              </div>
+            )}
+          </div>
+
+          <div style={{ display: 'flex', padding: '0 16px', marginBottom: '12px', gap: '8px' }}>
+            <button className="btn-warning" onClick={openSettings}>⚙️ 本金</button>
+            <button 
+              className="btn-primary" 
+              onClick={() => { 
+                if (!isStopped()) { 
+                  resetForm(); 
+                  setModal(true); 
+                } else { 
+                  alert(`交易已暂停至 ${new Date(settings.stopEndDate).toLocaleDateString()}`); 
+                } 
+              }}
+            >
+              + 添加
+            </button>
+          </div>
+
+          {trades.length === 0 ? (
+            <div className="card" style={{ textAlign: 'center', color: '#666' }}>
+              暂无交易记录
+            </div>
+          ) : (
+            trades.map(t => (
+              <div className="card" key={t.id}>
+                <strong>{t.code}</strong> {t.name} | {t.date}
+                <p>买入: {t.buyPrice} → 卖出: {t.sellPrice || '未卖出'}</p >
+                <p>盈亏: 
+                  {t.profit === '' ? '未实现' : (
+                    <span className={parseFloat(t.profit) >= 0 ? 'profit' : 'loss'}>
+                      ¥{t.profit} ({t.profitRatio}%)
+                    </span>
+                  )}
+                </p >
+                <p>理由: {t.reason || '—'}</p >
+                <div style={{ textAlign: 'right', marginTop: '8px' }}>
+                  <button onClick={() => startEdit(t)}>✏️ 编辑</button>
+                  <button className="btn-danger" onClick={() => deleteTrade(t.id)}>🗑️ 删除</button>
+                </div>
+              </div>
+            ))
+          )}
+
+          {modal && (
+            <div style={styles.modal}>
+              <div style={styles.modalContent}>
+                <h2>{editId ? '编辑' : '添加'}交易</h2>
+                <input 
+                  type="date" 
+                  className="input" 
+                  value={form.date} 
+                  onChange={e => setForm({...form, date: e.target.value})} 
+                />
+                <input 
+                  placeholder="股票代码（如：600000）" 
+                  className="input" 
+                  value={form.code} 
+                  onChange={e => setForm({...form, code: e.target.value})} 
+                />
+                <input 
+                  placeholder="股票名称" 
+                  className="input" 
+                  value={form.name} 
+                  onChange={e => setForm({...form, name: e.target.value})} 
+                />
+                <input 
+                  placeholder="买入价格" 
+                  className="input" 
+                  value={form.buyPrice} 
+                  onChange={e => setForm({...form, buyPrice: e.target.value})} 
+                  type="number" 
+                  step="0.01"
+                />
+                <input 
+                  placeholder="数量（100的倍数）" 
+                  className="input" 
+                  value={form.quantity} 
+                  onChange={e => setForm({...form, quantity: e.target.value})} 
+                  type="number" 
+                />
+                <input 
+                  placeholder="卖出价格（可选）" 
+                  className="input" 
+                  value={form.sellPrice} 
+                  onChange={e => setForm({...form, sellPrice: e.target.value})} 
+                  type="number" 
+                  step="0.01"
+                />
+                <textarea 
+                  placeholder="交易理由" 
+                  className="input" 
+                  value={form.reason} 
+                  onChange={e => setForm({...form, reason: e.target.value})} 
+                  rows="3"
+                ></textarea>
+                <div style={{ marginTop: '20px', display: 'flex', justifyContent: 'space-between' }}>
+                  <button onClick={() => setModal(false)}>取消</button>
+                  <button className="btn-primary" onClick={handleSubmit}>{editId ? '更新' : '添加'}</button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    const styles = {
+      modal: { 
+        position: 'fixed', 
+        top: 0, 
+        left: 0, 
+        right: 0, 
+        bottom: 0, 
+        backgroundColor: 'rgba(0,0,0,0.5)', 
+        display: 'flex', 
+        alignItems: 'center', 
+        justifyContent: 'center',
+        zIndex: 1000
+      },
+      modalContent: { 
+        backgroundColor: 'white', 
+        padding: '20px', 
+        borderRadius: '10px', 
+        width: '90%', 
+        maxWidth: '500px'
+      }
+    };
+
+    const root = ReactDOM.createRoot(document.getElementById('app'));
+    root.render(<App />);
+  </script>
+</body>
+</html>
